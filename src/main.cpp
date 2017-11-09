@@ -11,9 +11,10 @@ Ticker mytik2;
 int power = 0;
 int onTimer = 0;
 int offTimer = 0;
-bool out = true;
+bool out = false;
 ESP8266WebServer server(80);
 const int PWM_OUT = LED_BUILTIN;
+const int STATUS_OUT = D3;
 
 /** Handle pwm
 *		call evry 20ms
@@ -22,8 +23,10 @@ void pwm(){
 	static int tick=0;
 
 	if (tick<power) {
-		// if(out) //zero active :D
+		if(out) //zero active :D
 			digitalWrite(PWM_OUT, 0);
+		else
+			digitalWrite(PWM_OUT, 1);
 	}
 	else{
 		digitalWrite(PWM_OUT, 1);
@@ -39,22 +42,29 @@ void pwm(){
 */
 void onOffTimer(){
 	if(onTimer > 0){
+		digitalWrite(STATUS_OUT, 0);
 		onTimer --;
-		if(onTimer==0)
+		if(onTimer==0){
 			out = true;
+			if(offTimer==0)
+				digitalWrite(STATUS_OUT, 1);
+		}
 	}
 	if(offTimer > 0){
+		digitalWrite(STATUS_OUT, 0);
 		offTimer --;
 		if(offTimer==0){
 			out = false;
 			digitalWrite(PWM_OUT, 1);
+			if(onTimer==0)
+				digitalWrite(STATUS_OUT, 1);
 		}
 	}
 }
 
 /** Handle root for http */
 void HttpRoot() {
-	char temp[1024];
+	char temp[1305], timeToOff[32]="", timeToOn[32]="", status[4];
 	int sec = millis() / 1000;
 	int min = sec / 60;
 	int hr = min / 60;
@@ -66,27 +76,49 @@ void HttpRoot() {
 		EEPROM.commit();
 	}
 
+	String strToggle = server.arg("tg");
+	if(strToggle.length()>0){
+		if(strToggle=="off")
+			out = true;
+		else
+			out = false;
+	}
+
 	String strOffTimer = server.arg("offt");
 	if(strOffTimer.length()>0){
-  	offTimer = strOffTimer.toInt();
-		EEPROM.write(2, offTimer);
-		EEPROM.commit();
+		offTimer = strOffTimer.toInt();
+		if(offTimer)
+			digitalWrite(STATUS_OUT, 0);
 	}
 
 	String strOntimer = server.arg("ont");
 	if(strOntimer.length()>0){
-  	onTimer = strOntimer.toInt();
-		EEPROM.write(4, onTimer);
-		EEPROM.commit();
+		onTimer = strOntimer.toInt();
+		if(onTimer)
+			digitalWrite(STATUS_OUT, 0);
 	}
-	snprintf ( temp, 1000, "<html>\
+	if(onTimer){
+		snprintf(timeToOn, 32, "<p> Time To On: %d min</p>", onTimer);
+	}
+	if(offTimer){
+		snprintf(timeToOff, 32, "<p> Time To Off: %d min</p>", offTimer);
+	}
+	if(out){
+		strcpy(status, "on");
+	}
+	else{
+		strcpy(status, "off");
+	}
+
+	snprintf ( temp, 1200, "<html>\
   <head>\
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>\
+		<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>\
+		<meta http-equiv='refresh' content='10; url=/' />\
     <title>Jooyeshgar Demo</title>\
     <style>\
       body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; text-align: center; }\
-			div,input,button{padding:5px;margin:5px;font-size:1em;width:95%;} form{max-width:350px;margin:auto}\
-			button{border:0;border-radius:0.3rem;background:#1fa3ec;color:#fff;line-height:2rem;font-size:1.2rem;}\
+			div,input,button,a{padding:5px;margin:5px;font-size:1em;width:95%;} form{max-width:350px;margin:auto}\
+			button,a{display:block;border:0;border-radius:0.3rem;background:#1fa3ec;color:#fff;line-height:2rem;font-size:1.2rem;}\
     </style>\
   </head>\
   <body>\
@@ -94,10 +126,12 @@ void HttpRoot() {
 		<form method='get' action='?'>\
 		 <input name='power' value='%d' length=5 placeholder='power'><br/><button type='submit'>Power</button><hr />\
 		 <input name='offt' value='%d' length=5 placeholder='OFF Timer'><br/><button type='submit'>OFF Timer</button><hr />\
-     <input name='ont' value='%d' length=5 placeholder='ON Timer'><br/><button type='submit'>ON Timer</button><hr /></form>\
-    <p>Uptime: %02d:%02d:%02d</p><p>Status: %s</p>\
+		 <input name='ont' value='%d' length=5 placeholder='ON Timer'><br/><button type='submit'>ON Timer</button><hr />\
+		 <a href='/?tg=%s'>%s</a></form>\
+		<p>Uptime: %02d:%02d:%02d</p>\
+		%s %s\
   </body>\
-</html>", power, offTimer, onTimer, hr, min % 60, sec % 60, (out)?"off":"on" );
+</html>", power, offTimer, onTimer, status, status, hr, min % 60, sec % 60, timeToOff, timeToOn );
 
 	server.send ( 200, "text/html", temp );
 }
@@ -124,8 +158,8 @@ void setup() {
     // put your setup code here, to run once:
     Serial.begin(115200);
 		power = EEPROM.read(0);
-		offTimer = EEPROM.read(2);
-		onTimer = EEPROM.read(4);
+		// offTimer = EEPROM.read(2);
+		// onTimer = EEPROM.read(4);
 
     WiFiManager wifiManager;
     //wifiManager.resetSettings();
@@ -141,6 +175,9 @@ void setup() {
     server.begin(); // Web server start
 
 		pinMode(PWM_OUT, OUTPUT);
+		digitalWrite(PWM_OUT, 1);
+		pinMode(STATUS_OUT, OUTPUT);
+		digitalWrite(STATUS_OUT, 1);
 		mytik.attach_ms(20, pwm); //attache pwm function
 		mytik2.attach(60, onOffTimer); // attache onOffTimer function
 }

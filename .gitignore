@@ -34,3 +34,4 @@
 .piolibdeps
 .clang_complete
 .gcc-flags.json
+.vscode/c_cpp_properties.json
