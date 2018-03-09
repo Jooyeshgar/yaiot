@@ -8,25 +8,24 @@
 #include <ESP8266WebServer.h>
 #include <EEPROM.h>
 #include <Ticker.h>
-// web server
-ESP8266WebServer server(80);
+#include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <string.h>
 
+ESP8266WebServer server(80);
 char ssid[100]={0};
 char password[100]={0};
 #include "config.h"
 #include "eeprom_func.h"
 
 #define DeviceID "0200000001"
-
-int gpio13Led = 13;
-int gpio12Relay = 12;
+#define TOPIC "iot/device/0200000001"
 
 int wifi_check_step = 0;
 int mod = 0;
 
-
+Ticker mytik;
+Ticker mytik2;
 int power = 0;
 int onTimer = 0;
 int offTimer = 0;
@@ -40,43 +39,47 @@ PubSubClient client(espClient);
 void handleRoot();
 void wifi_ap_mod();
 void handleGenericArgs();
+void pwm();
+void onOffTimer();
 
 void callback(char* topic, byte* payload, unsigned int length) {
  
   Serial.print("Message arrived in topic: ");
   Serial.println(topic);
- 
+  char inData[80];
+  StaticJsonBuffer<200> jsonBuffer;
   Serial.print("Message:");
   for (int i = 0; i < length; i++) {
     Serial.print((char)payload[i]);
+    inData[i] = (char)payload[i];
   }
   char temp[1305], timeToOff[32]="", timeToOn[32]="", status[4];
   int sec = millis() / 1000;
   int min = sec / 60;
   int hr = min / 60;
   
-  // it needs to fix
-  String strPower = 0;//payload(read and convert to json);
+  JsonObject& json_obj = jsonBuffer.parseObject(inData);  
+  String strPower = json_obj["strPower"];
   if(strPower.length()>0){
     power = strPower.toInt();
     EEPROM.write(202, power);
     EEPROM.commit();
   }
-  String strToggle = 0;//read from string in json format //server.arg("tg");
+  String strToggle = json_obj["strToggle"];
   if(strToggle.length()>0){
     if(strToggle=="off")
       out = true;
     else
       out = false;
   }
-  String strOffTimer = server.arg("offt");
+  String strOffTimer = json_obj["strOfft"];
   if(strOffTimer.length()>0){
     offTimer = strOffTimer.toInt();
     if(offTimer)
       digitalWrite(STATUS_OUT, 0);
   }
 
-  String strOntimer = server.arg("ont");
+  String strOntimer = json_obj["ont"];
   if(strOntimer.length()>0){
     onTimer = strOntimer.toInt();
     if(onTimer)
@@ -152,32 +155,25 @@ void wifi_connect(){
    
       }
   }
-  client.subscribe("iot/switch/0200000001"); 
+  client.subscribe(TOPIC); 
   
 }
 
 
 
 void setup(void){
-  EEPROM.begin(512);
-  // preparing GPIOs
-  pinMode(gpio13Led, OUTPUT);
-  digitalWrite(gpio13Led, HIGH);
-  
-  pinMode(gpio12Relay, OUTPUT);
-  digitalWrite(gpio12Relay, HIGH);
- 
+  EEPROM.begin(512); 
   Serial.begin(115200); 
   delay(2000);
   
   wifi_connect();
   pinMode(PWM_OUT, OUTPUT);
-		digitalWrite(PWM_OUT, 1);
-		pinMode(STATUS_OUT, OUTPUT);
-		digitalWrite(STATUS_OUT, 1);
-		mytik.attach_ms(20, pwm); //attache pwm function
-		mytik2.attach(60, onOffTimer); // attache onOffTimer function
-  //Serial.println("Connected to the WiFi network");
+  digitalWrite(PWM_OUT, 1);
+  pinMode(STATUS_OUT, OUTPUT);
+  digitalWrite(STATUS_OUT, 1);
+  mytik.attach_ms(20, pwm); //attache pwm function
+  mytik2.attach(60, onOffTimer); // attache onOffTimer function
+//Serial.println("Connected to the WiFi network");
 }
  
 
