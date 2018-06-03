@@ -5,7 +5,12 @@
 #include <ESP8266WebServer.h>
 #include <MyFi.h>         //https://github.com/tzapu/WiFiManager
 #include <Ticker.h>
+#include <PubSubClient.h>
 
+const char* mqtt_server = "88.99.85.188";
+WiFiClient espClient;
+PubSubClient client(espClient);
+#define DeviceID "001"
 Ticker mytik;
 Ticker mytik2;
 int power = 0;
@@ -153,6 +158,17 @@ void handleNotFound(){
     server.send ( 404, "text/plain", message );
 }
 
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+	Serial.print("Message arrived in topic: ");
+	Serial.println(topic);
+	Serial.println();
+	Serial.println("-----------------------");
+}
+
+void mqttReconnect() {
+    // reconnect code from PubSubClient example
+}
+
 void setup() {
 		EEPROM.begin(512);
     // put your setup code here, to run once:
@@ -180,10 +196,31 @@ void setup() {
 		digitalWrite(STATUS_OUT, 1);
 		mytik.attach_ms(20, pwm); //attache pwm function
 		mytik2.attach(60, onOffTimer); // attache onOffTimer function
+	// mqtt connection
+	client.setServer(mqtt_server, 1883);
+	client.setCallback(mqttCallback);
+    while (!client.connected()) {
+      Serial.println("Connecting to MQTT...");
+   
+      if (client.connect("ESP8266Client")) {
+   
+        Serial.println("connected");  
+   
+      } else {
+   
+        Serial.print("failed with state ");
+        Serial.print(client.state());
+        delay(2000);
+   
+      }
+  }
+
+  client.subscribe("iot/switch/001"); 
 }
 
 void loop() {
     //HTTP
     server.handleClient();
+	client.loop();
 
 }
