@@ -6,6 +6,7 @@
 #include <MyFi.h>         //https://github.com/tzapu/WiFiManager
 #include <Ticker.h>
 #include <PubSubClient.h>
+#include <ArduinoJson.h>
 
 const char* mqtt_server = "88.99.85.188";
 WiFiClient espClient;
@@ -161,8 +162,75 @@ void handleNotFound(){
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
 	Serial.print("Message arrived in topic: ");
 	Serial.println(topic);
-	Serial.println();
-	Serial.println("-----------------------");
+	char buff[50] = "";
+	int i;
+	for (i=0 ; i < length; i++) {
+		buff[i] = (char) payload[i];
+    }
+	buff[i] = '\0';
+	String str_rcv = String((char*) buff);
+    
+    StaticJsonBuffer<200> jsonBuffer;
+	JsonObject& root = jsonBuffer.parseObject(str_rcv);
+	////
+	char temp[1305], timeToOff[32]="", timeToOn[32]="", status[4];
+	int sec = millis() / 1000;
+	int min = sec / 60;
+	int hr = min / 60;
+
+	String strPower = root["power"];
+	if(strPower.length()>0){
+  	power = strPower.toInt();
+		EEPROM.write(0, power);
+		EEPROM.commit();
+	}
+
+	String strToggle = root["tg"];;
+	if(strToggle.length()>0){
+		if(strToggle=="off")
+			out = true;
+		else
+			out = false;
+	}
+
+	String strOffTimer = root["offt"];;
+	if(strOffTimer.length()>0){
+		offTimer = strOffTimer.toInt();
+		if(offTimer)
+			digitalWrite(STATUS_OUT, 0);
+	}
+
+	String strOntimer = root["ont"];;
+	if(strOntimer.length()>0){
+		onTimer = strOntimer.toInt();
+		if(onTimer)
+			digitalWrite(STATUS_OUT, 0);
+	}
+	if(onTimer){
+		snprintf(timeToOn, 32, "%d", onTimer);
+	}
+	if(offTimer){
+		snprintf(timeToOff, 32, "%d", offTimer);
+	}
+	if(out){
+		strcpy(status, "on");
+	}
+	else{
+		strcpy(status, "off");
+	}
+
+	snprintf ( temp, 1200, "\
+		{\
+		 'power': '%d',\
+		 'offt':'%d',\
+		 'ont':'%d',\
+		 'status': '%s',\
+		 'Uptime': '%02d:%02d:%02d', \
+		 'timeToOff': '%s', \
+		 'timeToOn': '%s'\
+		}", power, offTimer, onTimer, status, hr, min % 60, sec % 60, timeToOff, timeToOn );
+
+	Serial.println(temp);	
 }
 
 void mqttReconnect() {
