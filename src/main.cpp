@@ -185,12 +185,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 		EEPROM.commit();
 	}
 
-	String strToggle = root["tg"];;
+	String strToggle = root["tg"];
 	if(strToggle.length()>0){
 		if(strToggle=="off")
-			out = true;
-		else
 			out = false;
+		else
+			out = true;
 	}
 
 	String strOffTimer = root["offt"];;
@@ -231,6 +231,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 		}", power, offTimer, onTimer, status, hr, min % 60, sec % 60, timeToOff, timeToOn );
 
 	Serial.println(temp);	
+	client.publish("iot/message/001", "done"); 
 }
 
 void mqttReconnect() {
