@@ -186,11 +186,19 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 	}
 
 	String strToggle = root["tg"];
+	Serial.println(strToggle);
 	if(strToggle.length()>0){
-		if(strToggle=="off")
+		if(strToggle=="off"){
 			out = false;
-		else
+			EEPROM.write(1, 1);
+			EEPROM.commit();
+            digitalWrite(STATUS_OUT, 1);
+		}else{
 			out = true;
+			EEPROM.write(1, 0);
+			EEPROM.commit();
+			digitalWrite(STATUS_OUT, 0);
+		}	
 	}
 
 	String strOffTimer = root["offt"];;
@@ -241,8 +249,8 @@ void mqttReconnect() {
 void setup() {
 		EEPROM.begin(512);
     // put your setup code here, to run once:
-    Serial.begin(115200);
-		power = EEPROM.read(0);
+    Serial.begin(9600);
+	power = (int) EEPROM.read(0);
 		// offTimer = EEPROM.read(2);
 		// onTimer = EEPROM.read(4);
 
@@ -259,12 +267,17 @@ void setup() {
     server.onNotFound (handleNotFound);
     server.begin(); // Web server start
 
-		pinMode(PWM_OUT, OUTPUT);
-		digitalWrite(PWM_OUT, 1);
-		pinMode(STATUS_OUT, OUTPUT);
-		digitalWrite(STATUS_OUT, 1);
-		mytik.attach_ms(20, pwm); //attache pwm function
-		mytik2.attach(60, onOffTimer); // attache onOffTimer function
+	pinMode(PWM_OUT, OUTPUT);
+	digitalWrite(PWM_OUT, 1);
+	pinMode(STATUS_OUT, OUTPUT);
+	int out_temp = EEPROM.read(1);
+	digitalWrite(STATUS_OUT, out_temp);
+	if(out_temp==1)
+		out = false;
+	else
+	    out = true;
+	mytik.attach_ms(20, pwm); //attache pwm function
+	mytik2.attach(60, onOffTimer); // attache onOffTimer function
 	// mqtt connection
 	client.setServer(mqtt_server, 1883);
 	client.setCallback(mqttCallback);
@@ -291,5 +304,4 @@ void loop() {
     //HTTP
     server.handleClient();
 	client.loop();
-
 }
