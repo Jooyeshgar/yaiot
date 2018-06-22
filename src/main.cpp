@@ -68,46 +68,51 @@ void onOffTimer(){
 	}
 }
 
-/** Handle root for http */
-void HttpRoot() {
+
+char* operation(String strPower, String strToggle, String strOffTimer, String strOntimer){
+
 	char temp[1305], timeToOff[32]="", timeToOn[32]="", status[4];
 	int sec = millis() / 1000;
 	int min = sec / 60;
 	int hr = min / 60;
 
-	String strPower = server.arg("power");
 	if(strPower.length()>0){
   	power = strPower.toInt();
 		EEPROM.write(0, power);
 		EEPROM.commit();
 	}
 
-	String strToggle = server.arg("tg");
+	Serial.println(strToggle);
 	if(strToggle.length()>0){
-		if(strToggle=="off")
-			out = true;
-		else
+		if(strToggle=="off"){
 			out = false;
+			EEPROM.write(1, 1);
+			EEPROM.commit();
+            digitalWrite(STATUS_OUT, 1);
+		}else{
+			out = true;
+			EEPROM.write(1, 0);
+			EEPROM.commit();
+			digitalWrite(STATUS_OUT, 0);
+		}	
 	}
 
-	String strOffTimer = server.arg("offt");
 	if(strOffTimer.length()>0){
 		offTimer = strOffTimer.toInt();
 		if(offTimer)
 			digitalWrite(STATUS_OUT, 0);
 	}
 
-	String strOntimer = server.arg("ont");
 	if(strOntimer.length()>0){
 		onTimer = strOntimer.toInt();
 		if(onTimer)
 			digitalWrite(STATUS_OUT, 0);
 	}
 	if(onTimer){
-		snprintf(timeToOn, 32, "<p> Time To On: %d min</p>", onTimer);
+		snprintf(timeToOn, 32, "%d", onTimer);
 	}
 	if(offTimer){
-		snprintf(timeToOff, 32, "<p> Time To Off: %d min</p>", offTimer);
+		snprintf(timeToOff, 32, "%d", offTimer);
 	}
 	if(out){
 		strcpy(status, "on");
@@ -115,6 +120,49 @@ void HttpRoot() {
 	else{
 		strcpy(status, "off");
 	}
+
+	snprintf ( temp, 1200, "\
+		{\
+		 'power': '%d',\
+		 'offt':'%d',\
+		 'ont':'%d',\
+		 'status': '%s',\
+		 'Uptime': '%02d:%02d:%02d', \
+		 'timeToOff': '%s', \
+		 'timeToOn': '%s'\
+		}\0", power, offTimer, onTimer, status, hr, min % 60, sec % 60, timeToOff, timeToOn );
+
+	return temp;
+}
+
+
+/** Handle root for http */
+void HttpRoot() {
+	char temp[1305];
+	String strPower = server.arg("power");
+	String strToggle = server.arg("tg");
+	String strOffTimer = server.arg("offt");
+	String strOntimer = server.arg("ont");
+
+	char* buff_temp;
+    buff_temp = operation(strPower, strToggle, strOffTimer, strOntimer);
+    
+	StaticJsonBuffer<200> jsonBuffer;
+	JsonObject& root = jsonBuffer.parseObject(buff_temp);
+    
+	const char* status =  root["status"];
+	char strTg[4];
+	if(!strcmp(status, "off"))
+		strcpy(strTg, "on");
+	else
+	    strcpy(strTg, "off");
+	const char* timeToOn = root["ont"];
+	const char* timeToOff = root["offt"];
+	const char* upTime = root["Uptime"];
+	Serial.println(status);
+	Serial.println(timeToOn);
+	Serial.println(timeToOff);
+	Serial.println(upTime);
 
 	snprintf ( temp, 1200, "<html>\
   <head>\
@@ -134,10 +182,10 @@ void HttpRoot() {
 		 <input name='offt' value='%d' length=5 placeholder='OFF Timer'><br/><button type='submit'>OFF Timer</button><hr />\
 		 <input name='ont' value='%d' length=5 placeholder='ON Timer'><br/><button type='submit'>ON Timer</button><hr />\
 		 <a href='/?tg=%s'>%s</a></form>\
-		<p>Uptime: %02d:%02d:%02d</p>\
+		<p>Uptime: %s </p>\
 		%s %s\
   </body>\
-</html>", power, offTimer, onTimer, status, status, hr, min % 60, sec % 60, timeToOff, timeToOn );
+</html>", power, offTimer, onTimer, strTg, strTg, upTime, timeToOff, timeToOn);
 
 	server.send ( 200, "text/html", temp );
 }
@@ -173,73 +221,18 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     StaticJsonBuffer<200> jsonBuffer;
 	JsonObject& root = jsonBuffer.parseObject(str_rcv);
 	////
-	char temp[1305], timeToOff[32]="", timeToOn[32]="", status[4];
-	int sec = millis() / 1000;
-	int min = sec / 60;
-	int hr = min / 60;
+	char* buff_temp;
 
 	String strPower = root["power"];
-	if(strPower.length()>0){
-  	power = strPower.toInt();
-		EEPROM.write(0, power);
-		EEPROM.commit();
-	}
-
 	String strToggle = root["tg"];
-	Serial.println(strToggle);
-	if(strToggle.length()>0){
-		if(strToggle=="off"){
-			out = false;
-			EEPROM.write(1, 1);
-			EEPROM.commit();
-            digitalWrite(STATUS_OUT, 1);
-		}else{
-			out = true;
-			EEPROM.write(1, 0);
-			EEPROM.commit();
-			digitalWrite(STATUS_OUT, 0);
-		}	
-	}
-
 	String strOffTimer = root["offt"];;
-	if(strOffTimer.length()>0){
-		offTimer = strOffTimer.toInt();
-		if(offTimer)
-			digitalWrite(STATUS_OUT, 0);
-	}
+	String strOntimer = root["ont"];
+	buff_temp = operation(strPower, strToggle, strOffTimer, strOntimer);
 
-	String strOntimer = root["ont"];;
-	if(strOntimer.length()>0){
-		onTimer = strOntimer.toInt();
-		if(onTimer)
-			digitalWrite(STATUS_OUT, 0);
-	}
-	if(onTimer){
-		snprintf(timeToOn, 32, "%d", onTimer);
-	}
-	if(offTimer){
-		snprintf(timeToOff, 32, "%d", offTimer);
-	}
-	if(out){
-		strcpy(status, "on");
-	}
-	else{
-		strcpy(status, "off");
-	}
-
-	snprintf ( temp, 1200, "\
-		{\
-		 'power': '%d',\
-		 'offt':'%d',\
-		 'ont':'%d',\
-		 'status': '%s',\
-		 'Uptime': '%02d:%02d:%02d', \
-		 'timeToOff': '%s', \
-		 'timeToOn': '%s'\
-		}", power, offTimer, onTimer, status, hr, min % 60, sec % 60, timeToOff, timeToOn );
-
-	Serial.println(temp);	
-	client.publish("iot/message/001", "done"); 
+	
+    Serial.println(buff_temp);
+	String strPub(buff_temp);
+	client.publish("iot/message/001", strPub); 
 }
 
 void mqttReconnect() {
