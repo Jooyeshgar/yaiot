@@ -5,7 +5,13 @@
 #include <ESP8266WebServer.h>
 #include <MyFi.h>         //https://github.com/tzapu/WiFiManager
 #include <Ticker.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
 
+const char* mqtt_server = "88.99.85.188";
+WiFiClient espClient;
+PubSubClient client(espClient);
+#define DeviceID "001"
 Ticker mytik;
 Ticker mytik2;
 int power = 0;
@@ -62,46 +68,51 @@ void onOffTimer(){
 	}
 }
 
-/** Handle root for http */
-void HttpRoot() {
+
+char* operation(String strPower, String strToggle, String strOffTimer, String strOntimer){
+
 	char temp[1305], timeToOff[32]="", timeToOn[32]="", status[4];
 	int sec = millis() / 1000;
 	int min = sec / 60;
 	int hr = min / 60;
 
-	String strPower = server.arg("power");
 	if(strPower.length()>0){
   	power = strPower.toInt();
 		EEPROM.write(0, power);
 		EEPROM.commit();
 	}
 
-	String strToggle = server.arg("tg");
+	Serial.println(strToggle);
 	if(strToggle.length()>0){
-		if(strToggle=="off")
-			out = true;
-		else
+		if(strToggle=="off"){
 			out = false;
+			EEPROM.write(1, 1);
+			EEPROM.commit();
+            digitalWrite(STATUS_OUT, 1);
+		}else{
+			out = true;
+			EEPROM.write(1, 0);
+			EEPROM.commit();
+			digitalWrite(STATUS_OUT, 0);
+		}	
 	}
 
-	String strOffTimer = server.arg("offt");
 	if(strOffTimer.length()>0){
 		offTimer = strOffTimer.toInt();
 		if(offTimer)
 			digitalWrite(STATUS_OUT, 0);
 	}
 
-	String strOntimer = server.arg("ont");
 	if(strOntimer.length()>0){
 		onTimer = strOntimer.toInt();
 		if(onTimer)
 			digitalWrite(STATUS_OUT, 0);
 	}
 	if(onTimer){
-		snprintf(timeToOn, 32, "<p> Time To On: %d min</p>", onTimer);
+		snprintf(timeToOn, 32, "%d", onTimer);
 	}
 	if(offTimer){
-		snprintf(timeToOff, 32, "<p> Time To Off: %d min</p>", offTimer);
+		snprintf(timeToOff, 32, "%d", offTimer);
 	}
 	if(out){
 		strcpy(status, "on");
@@ -109,6 +120,49 @@ void HttpRoot() {
 	else{
 		strcpy(status, "off");
 	}
+
+	snprintf ( temp, 1200, "\
+		{\
+		 'power': '%d',\
+		 'offt':'%d',\
+		 'ont':'%d',\
+		 'status': '%s',\
+		 'Uptime': '%02d:%02d:%02d', \
+		 'timeToOff': '%s', \
+		 'timeToOn': '%s'\
+		}\0", power, offTimer, onTimer, status, hr, min % 60, sec % 60, timeToOff, timeToOn );
+
+	return temp;
+}
+
+
+/** Handle root for http */
+void HttpRoot() {
+	char temp[1305];
+	String strPower = server.arg("power");
+	String strToggle = server.arg("tg");
+	String strOffTimer = server.arg("offt");
+	String strOntimer = server.arg("ont");
+
+	char* buff_temp;
+    buff_temp = operation(strPower, strToggle, strOffTimer, strOntimer);
+    
+	StaticJsonBuffer<200> jsonBuffer;
+	JsonObject& root = jsonBuffer.parseObject(buff_temp);
+    
+	const char* status =  root["status"];
+	char strTg[4];
+	if(!strcmp(status, "off"))
+		strcpy(strTg, "on");
+	else
+	    strcpy(strTg, "off");
+	const char* timeToOn = root["ont"];
+	const char* timeToOff = root["offt"];
+	const char* upTime = root["Uptime"];
+	Serial.println(status);
+	Serial.println(timeToOn);
+	Serial.println(timeToOff);
+	Serial.println(upTime);
 
 	snprintf ( temp, 1200, "<html>\
   <head>\
@@ -128,10 +182,10 @@ void HttpRoot() {
 		 <input name='offt' value='%d' length=5 placeholder='OFF Timer'><br/><button type='submit'>OFF Timer</button><hr />\
 		 <input name='ont' value='%d' length=5 placeholder='ON Timer'><br/><button type='submit'>ON Timer</button><hr />\
 		 <a href='/?tg=%s'>%s</a></form>\
-		<p>Uptime: %02d:%02d:%02d</p>\
+		<p>Uptime: %s </p>\
 		%s %s\
   </body>\
-</html>", power, offTimer, onTimer, status, status, hr, min % 60, sec % 60, timeToOff, timeToOn );
+</html>", power, offTimer, onTimer, strTg, strTg, upTime, timeToOff, timeToOn);
 
 	server.send ( 200, "text/html", temp );
 }
@@ -153,11 +207,43 @@ void handleNotFound(){
     server.send ( 404, "text/plain", message );
 }
 
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+	Serial.print("Message arrived in topic: ");
+	Serial.println(topic);
+	char buff[50] = "";
+	int i;
+	for (i=0 ; i < length; i++) {
+		buff[i] = (char) payload[i];
+    }
+	buff[i] = '\0';
+	String str_rcv = String((char*) buff);
+    
+    StaticJsonBuffer<200> jsonBuffer;
+	JsonObject& root = jsonBuffer.parseObject(str_rcv);
+	////
+	char* buff_temp;
+
+	String strPower = root["power"];
+	String strToggle = root["tg"];
+	String strOffTimer = root["offt"];;
+	String strOntimer = root["ont"];
+	buff_temp = operation(strPower, strToggle, strOffTimer, strOntimer);
+
+	
+    Serial.println(buff_temp);
+	String strPub(buff_temp);
+	client.publish("iot/message/001", strPub); 
+}
+
+void mqttReconnect() {
+    // reconnect code from PubSubClient example
+}
+
 void setup() {
 		EEPROM.begin(512);
     // put your setup code here, to run once:
-    Serial.begin(115200);
-		power = EEPROM.read(0);
+    Serial.begin(9600);
+	power = (int) EEPROM.read(0);
 		// offTimer = EEPROM.read(2);
 		// onTimer = EEPROM.read(4);
 
@@ -174,16 +260,41 @@ void setup() {
     server.onNotFound (handleNotFound);
     server.begin(); // Web server start
 
-		pinMode(PWM_OUT, OUTPUT);
-		digitalWrite(PWM_OUT, 1);
-		pinMode(STATUS_OUT, OUTPUT);
-		digitalWrite(STATUS_OUT, 1);
-		mytik.attach_ms(20, pwm); //attache pwm function
-		mytik2.attach(60, onOffTimer); // attache onOffTimer function
+	pinMode(PWM_OUT, OUTPUT);
+	digitalWrite(PWM_OUT, 1);
+	pinMode(STATUS_OUT, OUTPUT);
+	int out_temp = EEPROM.read(1);
+	digitalWrite(STATUS_OUT, out_temp);
+	if(out_temp==1)
+		out = false;
+	else
+	    out = true;
+	mytik.attach_ms(20, pwm); //attache pwm function
+	mytik2.attach(60, onOffTimer); // attache onOffTimer function
+	// mqtt connection
+	client.setServer(mqtt_server, 1883);
+	client.setCallback(mqttCallback);
+    while (!client.connected()) {
+      Serial.println("Connecting to MQTT...");
+   
+      if (client.connect("ESP8266Client")) {
+   
+        Serial.println("connected");  
+   
+      } else {
+   
+        Serial.print("failed with state ");
+        Serial.print(client.state());
+        delay(2000);
+   
+      }
+  }
+
+  client.subscribe("iot/switch/001"); 
 }
 
 void loop() {
     //HTTP
     server.handleClient();
-
+	client.loop();
 }
